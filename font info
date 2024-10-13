@@ -1,0 +1,32 @@
+'''
+about
+font names
+font sizes
+font colors
+'''
+
+font_names = [
+    "8514oem",
+    "Arial","Arabic Transparent","Arial Baltic","Arial CE","Arial CYR",
+    "Arial Greek","Arial TUR","Arial Black","Bahnschrift","Calibri",
+    "Calibri Light","Cambria","Cambria Math","Candara","Comic Sans MS",
+    "Consolas","Constantia","Corbel","Corbel Light","Courier",
+    "Courier New","Ebrima","Fixedsys","Franklin Gothic Medium","Gabriola",
+    "Gadugi","Georgia","Impact","Marlett","Modern",
+    "MS Gothic","MS Serif","MS Sans Serif","Roman","Script",
+    "Segoe","Small Fonts","Symbol","System","TeamViewer15",
+    "Terminal","Tahoma","Times New Roman","Verdana","Webdings",
+    "Wingdings",
+            ]
+
+font_sizes = ["8","10","11","12","14","16","18","20","24","36","72",]
+
+font_colors = [
+    "black","white",
+    "red","blue",
+    "green","yellow",
+    "orange","purple",
+    "pink","gray",
+            ]
+
+font_other = ["normal", "bold", "italic", "underline"]
