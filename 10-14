@@ -1,0 +1,530 @@
+import tkinter as tk
+import tkinter.scrolledtext
+from tkinter import ttk, filedialog
+import time
+import subprocess
+import re
+import pyqrcode
+from translate import Translator
+
+import Categories
+import SaveLoad
+
+NAME = Categories.NAME
+VERSION = Categories.VERSION
+
+
+class ScrollableFrame:
+    def __next__(self,root):
+        self.root = root
+        self.width = 80
+        self.item_width = 10
+        self.height = None
+        self.anchor = "w"
+        self.orient = 'Y'
+        self.rootX = None
+        self.list = None
+        self.list_type = None
+        self.command = None
+        self.bd = 1
+        self.bg = "SystemButtonFace"
+        self.item_relief = "flat"
+
+        self.container = tk.Frame(
+            self.root, bd = self.bd, relief = "sunken"
+        )
+        self.canvas = tk.Canvas(
+            self.container, width = self.width, bg = self.bg
+        )
+
+        self.scrollbar = ttk.Scrollbar(
+            self.container, orient = tk.VERTICAL, command = self.canvas.yview
+        )
+        self.scrollable_frame = ttk.Frame(self.canvas) # put items here
+        self.scrollable_frame.bind(
+            "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window(
+            (0,0),window = self.scrollable_frame,anchor = tk.NW
+        )
+        self.scrollbar.pack(
+            side = tk.RIGHT,fill = tk.Y,expand = True
+        )
+        self.canvas.configure(
+            yscrollcommand=self.scrollbar.set
+        )
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        if not self.list:
+            pass
+        else:
+            for i in self.list:
+                if self.list_type == "label" or not self.list:
+                    tk.Label(
+                        self.scrollable_frame, text=i, width=self.item_width, relief="sunken"
+                    ).pack(fill=tk.X)
+                elif self.list_type == "button":
+                    tk.Button(
+                        self.scrollable_frame, text=i, width=self.item_width, relief ="sunken", anchor=self.anchor, command=self.command
+                    ).pack(fill=tk.X)
+
+
+class WordProcessor:
+    def __init__(self,root=tk.Tk(),font="times"):
+        self.root = root
+        self.root.title(f'{NAME} {VERSION}')
+        self.fullscreen = False
+
+        self.font = font
+
+        self.to_change = ""
+        self.color_tags = []
+        self.font_tags = []
+
+        self.root.protocol("WM_DELETE_WINDOW", self.want_to_save)
+
+    # MENU BAR
+        self.menu_bar = tk.Menu(self.root)
+        self.root["menu"] = self.menu_bar
+
+        ## FILE
+        file_items = {
+            "Save as (Ctrl+S)": lambda: SaveLoad.save_as(self.root),
+            "Load (Ctrl+O)": self.load,
+        }
+        file_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="File", menu=file_menu, compound=tk.LEFT)
+        self.populate_menu(file_menu,file_items)
+
+        ## EDIT
+        edit_items = {
+            "Spellcheck":self.spellcheck,
+            "Translate":self.translate_,
+        }
+        edit_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Edit", menu=edit_menu, compound=tk.LEFT)
+        self.populate_menu(edit_menu,edit_items)
+
+        ## VIEW
+        view_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="View", menu=view_menu, compound=tk.LEFT)
+
+        mode_items = {
+            "Light":self.light_mode,
+            "Dark":self.dark_mode,
+            "Retro":self.retro_mode,
+            "No Distractions":self.no_distractions_mode,
+        }
+        mode_menu = tk.Menu(view_menu, tearoff=0)
+        view_menu.add_cascade(label="Mode", menu=mode_menu, compound=tk.LEFT)
+        self.populate_menu(mode_menu,mode_items)
+
+        ## FORMAT
+        format_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Format", menu=format_menu, compound=tk.LEFT)
+        format_menu.add_command(label="Default Format", command=self.default_formatting)
+        format_menu.add_separator()
+
+        ### SPACING
+        spacing_types = {
+            'None':0,'0.5':5,'1.0':10,'1.25':12.5,'1.5':15,'2.0':20,'2.5':25,
+        }
+        spacing_menu = tk.Menu(format_menu, tearoff=0)
+        format_menu.add_cascade(label="Line Spacing", menu=spacing_menu, compound=tk.LEFT)
+        self.populate_menu(spacing_menu,spacing_types)
+
+        ### HIGHLIGHT
+        highlight_add_options = {
+            "Default": lambda: self.highlight("white", "black"),
+            "Inverted": lambda: self.highlight("black","white"),
+            "Yellow": lambda: self.highlight("yellow","black")
+        }
+        highlight_remove_options = {
+            'Remove all': lambda: self.remove_all_highlights(),
+            'Remove selected': lambda: self.remove_selected()
+        }
+        highlight_tagging_menu = tk.Menu(format_menu, tearoff=0)
+        format_menu.add_cascade(label="Highlight", menu=highlight_tagging_menu, compound=tk.LEFT)
+        self.populate_menu(highlight_tagging_menu,highlight_add_options)
+        highlight_tagging_menu.add_separator()
+        self.populate_menu(highlight_tagging_menu,highlight_remove_options)
+
+        ### PIZZAZZ
+        pizzazz_add_options = {
+            "Default": lambda: self.pizzazz_set_tag("normal"),
+            "Bold": lambda: self.pizzazz_set_tag("bold"),
+            "Italics": lambda: self.pizzazz_set_tag("italic"),
+            "Underline": lambda: self.pizzazz_set_tag("underline"),
+        }
+        pizzazz_remove_options = {
+            "Remove all": lambda: self.remove_all_pizzazz(),
+            "Remove selected": lambda: self.remove_selected(),
+        }
+        pizzazz_tagging_menu = tk.Menu(format_menu, tearoff=0)
+        format_menu.add_cascade(label="Pizzazz", menu=pizzazz_tagging_menu, compound=tk.LEFT)
+        self.populate_menu(pizzazz_tagging_menu,pizzazz_add_options)
+        pizzazz_tagging_menu.add_separator()
+        self.populate_menu(pizzazz_tagging_menu,pizzazz_remove_options)
+
+        ### CASE
+        case_options = {
+            "Upper": lambda: self.change_case("upper"),
+            "Lower": lambda: self.change_case("lower"),
+            "Title": lambda: self.change_case("title"),
+        }
+        upper_lower_menu = tk.Menu(format_menu,tearoff=0)
+        format_menu.add_cascade(label="Change Case",menu=upper_lower_menu,compound=tk.LEFT)
+        self.populate_menu(upper_lower_menu,case_options)
+
+        ## INSERT
+        insert_options = {
+            "Time": lambda: self.get_time(),
+            "Date": lambda: self.get_date(),
+            "Time and Date": lambda: self.get_time_and_date()
+        }
+        insert_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Insert", menu=insert_menu, compound=tk.LEFT)
+        self.populate_menu(insert_menu,insert_options)
+        insert_menu.add_separator()
+        insert_menu.add_command(label="Special Character", command=self.char_map)
+
+        ## HELP
+        help_items = {
+            "About":self.about,
+            "QRcode":self.text_to_qrcode
+        }
+        help_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Help", menu=help_menu, compound=tk.LEFT)
+        self.populate_menu(help_menu,help_items)
+
+    # PAPER - main typing area
+        self.text_frame = tk.LabelFrame(self.root,width=0,height=0)
+        self.text_frame.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
+
+        self.paper = tk.scrolledtext.ScrolledText(
+            self.text_frame,
+            height=31,
+            font=self.font,
+            undo=True,
+            autoseparators=True,
+            wrap=tk.WORD
+        )
+        self.paper.pack(fill=tk.BOTH,expand=True)
+
+    # RIGHT SIDE
+        self.attributes_frame = tk.Frame(self.root)
+        self.attributes_frame.pack(side=tk.RIGHT,fill=tk.BOTH,padx=5)
+
+        ## FIND AND REPLACE
+        self.replace_frame = tk.Frame(self.attributes_frame)
+        self.replace_frame.pack(side=tk.TOP,fill=tk.BOTH)
+
+        ### FIND
+        self.find_label = tk.Label(self.replace_frame,text="Find")
+        self.find_label.grid(row=0,column=0,sticky=tk.W)
+        self.find_entry = ttk.Entry(self.replace_frame)
+        self.find_entry.grid(row=1,column=0,sticky=tk.EW)
+
+        ### REPLACE
+        self.replace_label = tk.Label(self.replace_frame,text="Replace")
+        self.replace_label.grid(row=2,column=0,sticky=tk.W)
+        self.replace_entry = ttk.Entry(self.replace_frame)
+        self.replace_entry.grid(row=3,column=0,sticky=tk.EW)
+
+        ### FIND-AND-REPLACE BUTTON
+        self.find_replace_btn = ttk.Button(self.replace_frame,text="Replace",command=self.replace)
+        self.find_replace_btn.grid(row=4,column=0,sticky=tk.EW,pady=(5,0))
+
+        ## FONT SETTINGS
+        self.font_frame = tk.Frame(self.attributes_frame)
+        self.font_frame.pack(side=tk.TOP,fill=tk.BOTH)
+
+        ### NAME
+        self.font_name_frame = tk.Frame(self.font_frame)
+        self.font_name_frame.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_name_lbl = tk.Label(self.font_name_frame,text="Font name")
+        self.font_name_lbl.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_name = self.combo_box(self.font_frame,Categories.FONT_NAMES)
+        self.font_name.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_name.current(43)
+
+        ### SIZE
+        self.font_size_frame = tk.Frame(self.font_frame)
+        self.font_size_frame.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_size_lbl = tk.Label(self.font_size_frame,text="Font size")
+        self.font_size_lbl.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_size = self.combo_box(self.font_frame,Categories.FONT_SIZES)
+        self.font_size.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_size.current(3)
+
+        ### COLOR
+        self.font_color_frame = tk.Frame(self.font_frame)
+        self.font_color_frame.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_color_lbl = tk.Label(self.font_color_frame,text="Font color")
+        self.font_color_lbl.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_color = self.combo_box(self.font_frame,Categories.FONT_COLORS)
+        self.font_color.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_color.current(0)
+
+        ### EXTRA
+        self.font_extra_frame = tk.Frame(self.font_frame)
+        self.font_extra_frame.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_extra_lbl = tk.Label(self.font_extra_frame,text="Pizzazz")
+        self.font_extra_lbl.pack(side=tk.TOP,fill=tk.BOTH)
+        self.font_extra = self.combo_box(self.font_frame,Categories.FONT_OTHER)
+        self.font_extra.pack(side=tk.TOP,fill=tk.BOTH)
+
+        ### FONT BUTTON
+        self.font_btn = ttk.Button(self.font_frame,text="Set font",command=self.font_set)
+        self.font_btn.pack(side=tk.TOP,fill=tk.BOTH,pady=(5,0))
+
+        ## ALIGN TEXT
+        align_buttons = {
+            "":lambda: self.align("lefttag"),
+            "":lambda: self.align("centertag"),
+            "":lambda: self.align("righttag"),
+        }
+        align_frame = tk.Frame(self.attributes_frame)
+        align_frame.pack(side=tk.TOP, fill=tk.BOTH, padx=(17, 0), pady=(5, 0))
+        for button in align_buttons:
+            _ = tk.Button(align_frame, text=button, font=15, command = align_buttons[button])
+            _.pack(side=tk.LEFT, fill=tk.BOTH)
+
+        ## STATUS BAR
+        self.status_frame = tk.Frame(self.attributes_frame,bg="lightgray",bd=1)
+        self.status_frame.pack(side=tk.BOTTOM,fill=tk.BOTH,pady=(0,5))
+
+        self.status = tk.Label(
+            self.status_frame,
+            anchor="w",
+            font=("times",10,"normal"),
+            text = "Chars:0\nWords:0\nLines:0\nPages:0"
+        )
+        self.status.pack(side=tk.TOP,fill=tk.BOTH)
+        self.status_bar_update()
+
+        self.root.bind("<Control-s>", lambda: SaveLoad.save_as(self.root))
+        self.root.bind("<Control-o>", self.load)
+
+    def populate_menu(self,menu_name: object, items: dict) -> None:
+        for item in items:
+            menu_name.add_command(
+                label = str(item),
+                command = items[item],
+                compound = tk.LEFT
+            )
+
+    def combo_box(self,frame,items):
+        return ttk.Combobox(
+            frame,
+            values=items,
+            state="readonly",
+            width=17
+        )
+
+    def want_to_save(self):
+        def win_close():
+            wts.destroy()
+            self.root.destroy()
+
+        def save_as_2():
+            wts.destroy()
+            self.save_as()
+
+        wts = tk.Tk()
+        wts.resizable(False,False)
+        wts.update()
+        wts.geometry(
+            f"160x48+"
+            f"{(self.root.winfo_x() + self.root.winfo_width() // 2) - wts.winfo_width() // 2}+"
+            f"{(self.root.winfo_y() + self.root.winfo_height() // 2)}"
+        )
+        message = ttk.Label(wts,text="Do you want to save?")
+        message.grid(row=0,column=0,columnspan=2,padx=2)
+        yes = ttk.Button(wts,text="Yes",command=save_as_2)
+        yes.grid(row=1,column=0,sticky=tk.EW,padx=2)
+        no = ttk.Button(wts,text="No",command=win_close)
+        no.grid(row=1,column=1,sticky=tk.EW,padx=2)
+
+    # def save_as(self):
+    #     to_save = filedialog.asksaveasfile(
+    #         mode = "w",
+    #         initialfile=".txt",
+    #         filetypes=[("All Files","*.*"), ("Text Documents", "*.txt")],
+    #     )
+    #     save_info = f'{self.font_name.get()}\n{self.font_size.get()}\n{self.font_extra.get()}\n{self.font_color.get()}\n{self.paper.get(0.0,"end-1c")}'
+    #     to_save.write(save_info)
+    #     to_save.close()
+
+    def load(self):
+        to_load = filedialog.askopenfile(
+            mode = "r",
+            defaultextension=".txt",
+            filetypes=[("All Files", "*.*"), ("Text Documents", "*.txt")],
+        ).read()
+        self.paper.replace(0.0,"end-1c",to_load)
+
+        try:
+            self.paper.config(
+                font = ( # set font
+                    self.paper.get(1.0,1.999),
+                    self.paper.get(2.0,1.999),
+                    self.paper.get(3.0,1.999),
+                ),
+                fg = self.paper.get(4.0,4.999)
+            )
+        except:
+            self.paper.config(font="TkDefaultFont")
+        # remove font metadata
+        self.paper.delete(0.0,5.0)
+
+    def spellcheck(self):
+        print('Spellcheck')
+
+    def translate_(self):
+        print('Translate')
+
+    def light_mode(self):
+        self.paper.config(bg="white",fg="black",font=self.font)
+
+    def dark_mode(self):
+        self.paper.config(bg="black",fg="white",font=self.font)
+
+    def retro_mode(self):
+        self.paper.config(bg="grey10",fg="lightgreen",font=["Terminal", 20, "normal"])
+
+    def no_distractions_mode(self):
+        self.attributes_frame.pack_forget()
+
+    def default_formatting(self):  # clear all tags
+        for i in self.paper.tag_names():
+            self.paper.tag_delete(i)
+
+    def double_space(self,spacing: int):
+        print("Double spacing")
+        self.paper.tag_add("whole","2.0","end-1c")
+        self.paper.tag_configure("whole",spacing1=spacing)
+
+    def highlight(self,bg_color: str,word_color: str):
+        self.paper.tag_add(f"{bg_color}{word_color}", tk.SEL_FIRST, tk.SEL_LAST)
+        self.paper.tag_configure(f"{bg_color}{word_color}", background=bg_color, foreground=word_color)
+        if f"{bg_color}{word_color}" not in self.color_tags:
+            self.color_tags.append(f"{bg_color}{word_color}")
+
+    def remove_all_highlights(self):  # doesn't include line spacing or font settings
+        for i in self.color_tags:
+            self.paper.tag_delete(i)
+
+    def pizzazz_set_tag(self,tag):
+        self.paper.tag_add(tag, tk.SEL_FIRST, tk.SEL_LAST)
+        self.paper.tag_configure(tag, font=[self.font_name.get(), self.font_size.get(), tag])
+        if tag not in self.font_tags:
+            self.font_tags.append(tag)
+
+    def remove_all_pizzazz(self):  # doesn't include line spacing or highlight settings
+        for i in self.font_tags:
+            self.paper.tag_delete(i)
+
+    def remove_selected(self):  # currently applies to all highlights of same color.  How to change?
+        for tag in self.paper.tag_names():
+            span = re.findall(r"\d*\.\d*", str(self.paper.tag_ranges(tag)))
+            if len(span) > 0:
+                if span[0] <= self.paper.index(tk.INSERT) <= span[1]:
+                    self.paper.tag_delete(tag)
+
+    def change_case(self,case: str):
+        n = self.paper.get(1.0,"end=1c")
+        match case:
+            case "upper":
+                n = n.upper()
+            case "lower":
+                n = n.lower()
+            case "title":
+                n = n.title()
+        self.paper.delete(1.0,"end-1c")
+        self.paper.insert("end-1c",n)
+
+    def get_time(self):
+        self.paper.insert(tk.INSERT, time.strftime("%H:%M:%S"))
+
+    def get_date(self):
+        self.paper.insert(tk.INSERT, time.strftime("%d-%m-%y"))
+
+    def get_time_and_date(self):
+        self.paper.insert(tk.INSERT,time.strftime("%c"))
+
+    def char_map(self):
+        subprocess.call("C:\WINDOWS\system32\charmap.exe")
+
+    def about(self):
+        about_win = tk.Tk()
+        about_win.resizable(False,False)
+        about_win.update()
+        about_win.geometry(
+            f"450x135+"
+            f"{(self.root.winfo_x() + self.root.winfo_width() // 2) - about_win.winfo_width()}+"
+            f"{(self.root.winfo_y() + self.root.winfo_height() // 2 - about_win.winfo_height() // 4)}"
+        )
+        about_note = ttk.Label(
+            about_win,justify="left",
+            text= f"Filler text for {NAME} {VERSION}"
+        )
+        about_note.pack(fill=tk.BOTH,padx=5,pady=1)
+
+    def text_to_qrcode(self):
+        print('Qrcode')
+        # to_convert = self.paper.get(0.0,"end-1c")
+        # to_scan = pyqrcode.create(to_convert,encoding="utf-8")
+        # to_scan.png("My QRcode.png",scale=6)
+        #
+        # from PIL import Image
+        #
+        # img = Image.open("My QRcode.png")
+        # img.show()
+
+    def replace(self):
+        text = str(self.paper.get(1.0,"end-1c"))
+        find = str(self.find_entry.get())
+        repl = str(self.replace_entry.get())
+        result = text.replace(find,repl)
+        self.paper.delete(1.0,"end-1c")
+        self.paper.insert(1.0,result)
+
+    def font_set(self):
+        N = str(self.font_name.get())
+        S = int(self.font_size.get())
+        X = str(self.font_extra.get())
+        C = str(self.font_color.get())
+
+        if self.paper.index(tk.SEL_FIRST) == self.paper.index(tk.SEL_LAST):
+            # change all if not selected
+            self.paper.config(font = (N,S,X), fg = C)
+        else:
+            # change selected
+            self.paper.tag_add("dn",tk.SEL_FIRST,tk.SEL_LAST)
+            self.paper.tag_configure("dn",font=(N, S, X), fg=C)
+
+    def align(self,side: str):
+        sides = {'lefttag', 'centertag', 'righttag'}
+        sides.remove(side)
+
+        self.paper.tag_configure(side, justify=side[:-3])
+        for s in sides:
+            self.paper.tag_delete(s)
+        self.paper.tag_add(side, 1.0, "end")
+
+    def status_bar_update(self):
+        x = self.paper.get(0.0, "end-1c")
+        words = len(x.split())
+        chars = len([i for i in self.paper.get(0.0, "end-1c") if i not in (" ", "\n")])
+        lines = int(float(self.paper.index("end")) - 1)
+        pages = int((float(self.paper.index("end")) // 28)) + 1
+        self.status.config(
+            text=f"Chars: {chars}\nWords: {words}\nLines: {lines}\nPages: {pages}"
+        )
+        self.status.after(200, self.status_bar_update)
+
+if __name__ == '__main__':
+    w = WordProcessor()
+    w.root.mainloop()
